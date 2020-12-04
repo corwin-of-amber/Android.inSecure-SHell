@@ -15,8 +15,8 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define PORT   "5910"
-#define SECRET "<cs591secret>\n"
+#define PORT   "2220"
+#define SECRET "<plain-sight>\n"
 #define BUFFERSIZE 64 * 1024
 
 struct termios saved_attributes;
@@ -75,15 +75,18 @@ void print_addrinfo(struct addrinfo *input)
 
 int main(int argc, char **argv)
 {
-    if(argc != 2)
+    if (!(argc == 2 || argc == 3))
     {
-        fprintf(stderr,"usage: %s hostname\n", argv[0]);
+        fprintf(stderr,"usage: %s hostname <port>\n", argv[0]);
         return 1;
     }
 
+    const char *host = argv[1];
+    const char *port = argc == 3 ? argv[2] : PORT;
+
     signal(SIGINT, sigint_handler);
 
-    printf("Looking up addresses for %s ...\n", argv[1]);
+    printf("Looking up addresses for %s ...\n", host);
 
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
@@ -91,7 +94,7 @@ int main(int argc, char **argv)
     hints.ai_socktype = SOCK_STREAM;
 
     struct addrinfo *dnsres;
-    int status = getaddrinfo(argv[1], PORT, &hints, &dnsres);
+    int status = getaddrinfo(host, port, &hints, &dnsres);
     if(status != 0)
     {
         fprintf(stderr, "dns lookup failed: %s\n", gai_strerror(status));
@@ -118,7 +121,7 @@ int main(int argc, char **argv)
     readline(sockfd, buf);
     printf("Received: %s", buf);
 
-    if(strcmp(buf, "<rembash2>\n") != 0)
+    if(strcmp(buf, "<ishd>\n") != 0)
     {
         fprintf(stderr, "protocol failed\n");
         return 4;

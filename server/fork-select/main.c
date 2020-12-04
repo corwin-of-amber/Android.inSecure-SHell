@@ -6,7 +6,11 @@
 #include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
+#ifdef __APPLE__  /* macOS is BSD-like */
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,8 +22,21 @@
 #include <termios.h>
 #include <unistd.h>
 
-#define PORT   "5910"
-#define SECRET "<cs591secret>"
+#ifdef __ANDROID_API__
+#define SHELL "/system/xbin/bash"
+#else
+#define SHELL "/bin/bash"
+#endif
+#define SHELL_NAME "bash"
+
+#if defined(__ANDROID_API__) && __ANDROID_API__ < 21
+/* polyfilled in infra/glibc/forkpty.c */
+pid_t forkpty(int *amaster, char *name, const struct termios *termp,
+              const struct winsize *winp);
+#endif
+
+#define PORT   "2220"
+#define SECRET "<plain-sight>"
 #define BUFFERSIZE 64 * 1024
 
 void sigchld_handler(int s)
@@ -37,7 +54,7 @@ void *get_in_addr(struct sockaddr *sa) // get sockaddr, IPv4 or IPv6:
 
 void handle_client(int sockfd)
 {
-    const char *hello_msg = "<rembash2>\n";
+    const char *hello_msg = "<ishd>\n";
     int hello_len = strlen(hello_msg);
     int bytes_sent = send(sockfd, hello_msg, hello_len, 0);
     if(bytes_sent == -1 || bytes_sent != hello_len)
@@ -48,7 +65,12 @@ void handle_client(int sockfd)
 
     char shared_key[256];
     int nbytes = recv(sockfd, shared_key, 255, 0); // it's not 100% guaranteed to work! must use readline.
-    shared_key[nbytes - 1] = '\0';
+    char *eol = strchr(shared_key, '\n');
+    if (eol == NULL) {
+        printf("Invalid handshake (missing EOL)\n");
+        return;
+    }
+    *eol = '\0';
     printf("Received %s from [%d]\n", shared_key, sockfd);
 
     if(strcmp(shared_key, SECRET) != 0)
@@ -69,7 +91,7 @@ void handle_client(int sockfd)
     int master;
     pid_t pid;
 
-    signal(SIGCHLD, SIG_IGN);
+    //signal(SIGCHLD, SIG_IGN);
     pid = forkpty(&master, NULL, NULL, NULL);
 
     if(pid < 0)
@@ -82,16 +104,15 @@ void handle_client(int sockfd)
 
     if(pid == 0) // child
     {
-        //execl("/bin/bash", "bash", "--noediting", "-i", NULL);
-        execl("/bin/bash", "bash", NULL);
+        execl(SHELL, SHELL_NAME, NULL);
     }
     else
     {
         const char *ready_msg = "<ready>\n";
         send(sockfd, ready_msg, strlen(ready_msg), 0);
 
-        /*
         // remove the echo
+        /*
         struct termios tios;
         tcgetattr(master, &tios);
         tios.c_lflag &= ~(ECHO | ECHONL);
@@ -140,8 +161,16 @@ void handle_client(int sockfd)
     }
 }
 
-int main(void)
+int main(int argc, char *argv[])
 {
+    if (!(argc == 1 || argc == 2))
+    {
+        fprintf(stderr,"usage: %s <port>\n", argv[0]);
+        return 1;
+    }
+
+    const char *port = argc == 2 ? argv[1] : PORT;
+
     struct addrinfo hints;
     memset(&hints, 0, sizeof(hints));
     hints.ai_socktype = SOCK_STREAM;
@@ -150,7 +179,7 @@ int main(void)
     hints.ai_family = AF_INET6; // IPv4 addresses will be like ::ffff:127.0.0.1
 
     struct addrinfo *servinfo;
-    getaddrinfo(NULL, PORT, &hints, &servinfo);
+    getaddrinfo(NULL, port, &hints, &servinfo);
 
 #if DEBUG
     for(struct addrinfo *p = servinfo; p != NULL; p = p->ai_next)
@@ -164,7 +193,7 @@ int main(void)
     struct addrinfo *servinfo2 = servinfo; //servinfo->ai_next;
     char ipstr[INET6_ADDRSTRLEN];
     inet_ntop(servinfo2->ai_family, get_in_addr(servinfo2->ai_addr), ipstr, sizeof(ipstr));
-    printf("Waiting for connections on [%s]:%s\n", ipstr, PORT);
+    printf("Waiting for connections on [%s]:%s\n", ipstr, port);
 
     int sockfd = socket(servinfo2->ai_family, servinfo2->ai_socktype, servinfo2->ai_protocol);
 
