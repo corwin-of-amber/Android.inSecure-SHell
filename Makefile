@@ -14,14 +14,16 @@ CFLAGS = -target arm-linux-androideabi -D__ANDROID_API__=20
 
 LD = $(NDK_LLVM_BIN)/arm-linux-androideabi-ld
 
-ISHD_OBJ = obj/infra/sys/start.o obj/server/fork-select/main.o \
-	       obj/infra/glibc/login_tty.o obj/infra/glibc/openpty.o obj/infra/glibc/forkpty.o
+ISHD_OBJ = obj/infra/sys/start.o \
+		   ${addprefix obj/server/fork-select/, main.o control.o} \
+	       ${addprefix obj/infra/glibc/, login_tty.o openpty.o forkpty.o}
 
-ISH_OBJ = obj/infra/sys/start.o obj/client/select/main.o
+ISH_OBJ = obj/infra/sys/start.o \
+		  ${addprefix obj/client/select/, main.o control.o}
 
 # Host build (gcc)
-HOST_ISHD_OBJ = obj/host/server/fork-select/main.o
-HOST_ISH_OBJ  = obj/host/client/select/main.o
+HOST_ISHD_OBJ = ${addprefix obj/host/server/fork-select/, main.o control.o}
+HOST_ISH_OBJ  = ${addprefix obj/host/client/select/, main.o control.o}
 
 HOSTCC = gcc
 HOSTLD = $(HOSTCC)
@@ -58,8 +60,8 @@ run: run-ishd
 
 run-%:
 	adb push bin/$* /data/local/tmp/
-	adb shell /data/local/tmp/$*
+	adb shell /data/local/tmp/$* $(A)
 
 %-run: bin/%
 	adb push bin/$* /data/local/tmp/
-	adb shell /data/local/tmp/$*
+	adb shell /data/local/tmp/$* $(A)

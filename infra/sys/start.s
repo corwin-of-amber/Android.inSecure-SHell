@@ -17,7 +17,9 @@ _start:
     mov     %r7, $4     /* write is syscall #4 */
     swi     $0          /* invoke syscall */
 
-    bl    main
+    ldr     %r0, [%sp]     /* argc */
+    add     %r1, %sp, #4   /* argv (?) */
+    bl      main
 
     /* syscall exit(int status) */
     mov     %r0, $0     /* status := 0 */

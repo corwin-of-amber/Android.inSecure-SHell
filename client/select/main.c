@@ -15,6 +15,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "control.h"
+
 #define PORT   "2220"
 #define SECRET "<plain-sight>\n"
 #define BUFFERSIZE 64 * 1024
@@ -75,14 +77,16 @@ void print_addrinfo(struct addrinfo *input)
 
 int main(int argc, char **argv)
 {
-    if (!(argc == 2 || argc == 3))
+    if (!(argc >= 2 && argc <= 5))
     {
-        fprintf(stderr,"usage: %s hostname <port>\n", argv[0]);
+        fprintf(stderr, "usage: %s hostname <port> <command> <arg>\n", argv[0]);
         return 1;
     }
 
     const char *host = argv[1];
-    const char *port = argc == 3 ? argv[2] : PORT;
+    const char *port = argc >= 3 ? argv[2] : PORT;
+    const char *command = argc >= 4 ? argv[3] : 0;
+    const char *arg = argc >= 5 ? argv[4] : 0;
 
     signal(SIGINT, sigint_handler);
 
@@ -127,6 +131,11 @@ int main(int argc, char **argv)
         return 4;
     }
 
+    if (command != 0 && arg != 0) {
+        int rc = send_command(sockfd, command, arg);
+        return rc == 0 ? 0 : 1;
+    }
+
     send(sockfd, SECRET, strlen(SECRET), 0);
 
     readline(sockfd, buf);
@@ -147,24 +156,21 @@ int main(int argc, char **argv)
         return 6;
     }
 
-    // Make sure stdin is a terminal.
-    if (!isatty(STDIN_FILENO))
+    // Set up terminal
+    if (isatty(STDIN_FILENO))
     {
-        fprintf (stderr, "Not a terminal.\n");
-        exit (EXIT_FAILURE);
+        // Save the terminal attributes so we can restore them later.
+        tcgetattr(STDIN_FILENO, &saved_attributes);
+        atexit(reset_input_mode);
+
+        // Set the funny terminal modes.
+        struct termios tattr;
+        tcgetattr(STDIN_FILENO, &tattr);
+        tattr.c_lflag &= ~(ICANON | ECHO); // Clear ICANON and ECHO.
+        tattr.c_cc[VMIN] = 1;
+        tattr.c_cc[VTIME] = 0;
+        tcsetattr(STDIN_FILENO, TCSAFLUSH, &tattr);
     }
-
-    // Save the terminal attributes so we can restore them later.
-    tcgetattr(STDIN_FILENO, &saved_attributes);
-    atexit(reset_input_mode);
-
-    // Set the funny terminal modes.
-    struct termios tattr;
-    tcgetattr(STDIN_FILENO, &tattr);
-    tattr.c_lflag &= ~(ICANON | ECHO); // Clear ICANON and ECHO.
-    tattr.c_cc[VMIN] = 1;
-    tattr.c_cc[VTIME] = 0;
-    tcsetattr(STDIN_FILENO, TCSAFLUSH, &tattr);
 
     fd_set master, readfds;
     FD_ZERO(&master);

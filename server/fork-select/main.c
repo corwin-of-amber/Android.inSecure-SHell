@@ -22,6 +22,8 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "control.h"
+
 #ifdef __ANDROID_API__
 #define SHELL "/system/xbin/bash"
 #else
@@ -37,13 +39,13 @@ pid_t forkpty(int *amaster, char *name, const struct termios *termp,
 
 #define PORT   "2220"
 #define SECRET "<plain-sight>"
+#define CTRLTOK "<control>"
 #define BUFFERSIZE 64 * 1024
 
 void sigchld_handler(int s)
 {
     (void) s;
-    while(waitpid(-1, NULL, WNOHANG) > 0);
-    printf("Connection closed.\n");
+    while (waitpid(-1, NULL, WNOHANG) > 0);
 }
 
 void *get_in_addr(struct sockaddr *sa) // get sockaddr, IPv4 or IPv6:
@@ -57,7 +59,7 @@ void handle_client(int sockfd)
     const char *hello_msg = "<ishd>\n";
     int hello_len = strlen(hello_msg);
     int bytes_sent = send(sockfd, hello_msg, hello_len, 0);
-    if(bytes_sent == -1 || bytes_sent != hello_len)
+    if (bytes_sent == -1 || bytes_sent != hello_len)
     {
         perror("send hello_msg");
         return;
@@ -67,15 +69,21 @@ void handle_client(int sockfd)
     int nbytes = recv(sockfd, shared_key, 255, 0); // it's not 100% guaranteed to work! must use readline.
     char *eol = strchr(shared_key, '\n');
     if (eol == NULL) {
-        printf("Invalid handshake (missing EOL)\n");
+        printf("[%d] Invalid handshake (missing EOL)\n", sockfd);
         return;
     }
     *eol = '\0';
-    printf("Received %s from [%d]\n", shared_key, sockfd);
+    printf("[%d] Received %s\n", sockfd, shared_key);
 
-    if(strcmp(shared_key, SECRET) != 0)
+    if (strcmp(shared_key, SECRET) != 0)
     {
-        printf("Shared key check failed for [%d]\n", sockfd);
+        if (strcmp(shared_key, CTRLTOK) == 0) {
+            printf("[%d] Switching to control protocol", sockfd);
+            handle_control(sockfd, eol + 1, 
+                    shared_key + nbytes - eol - 1);
+        }
+        else
+            printf("[%d] Shared key check failed\n", sockfd);
         return;
     }
 
@@ -94,7 +102,7 @@ void handle_client(int sockfd)
     //signal(SIGCHLD, SIG_IGN);
     pid = forkpty(&master, NULL, NULL, NULL);
 
-    if(pid < 0)
+    if (pid < 0)
     {
         const char *error_msg = "forkpty failed\n";
         perror(error_msg);
@@ -102,7 +110,7 @@ void handle_client(int sockfd)
         return;
     }
 
-    if(pid == 0) // child
+    if (pid == 0) // child
     {
         execl(SHELL, SHELL_NAME, NULL);
     }
@@ -121,7 +129,7 @@ void handle_client(int sockfd)
 
         int maxfd = master > sockfd ? master : sockfd;
 
-        for(;;)
+        for (;;)
         {
             char buf[BUFFERSIZE];
 
@@ -153,6 +161,7 @@ void handle_client(int sockfd)
                 if(nbytes < 1)
                 {
                     //perror("sockfd closed");
+                    printf("[%d] Connection closed", sockfd);
                     break;
                 }
                 write(master, buf, nbytes);
@@ -182,7 +191,7 @@ int main(int argc, char *argv[])
     getaddrinfo(NULL, port, &hints, &servinfo);
 
 #if DEBUG
-    for(struct addrinfo *p = servinfo; p != NULL; p = p->ai_next)
+    for (struct addrinfo *p = servinfo; p != NULL; p = p->ai_next)
     {
         char ipstr[INET6_ADDRSTRLEN];
         inet_ntop(p->ai_family, get_in_addr(p->ai_addr), ipstr, sizeof(ipstr)); // convert the IP to a string
@@ -230,7 +239,7 @@ int main(int argc, char *argv[])
     signal(SIGCHLD, SIG_IGN);
 #endif
 
-    for(;;)
+    for (;;)
     {
         struct sockaddr_storage their_addr; // connector's address information
         socklen_t addr_size = sizeof(their_addr);
@@ -238,12 +247,12 @@ int main(int argc, char *argv[])
 
         char ipstr[INET6_ADDRSTRLEN];
         inet_ntop(their_addr.ss_family, get_in_addr((struct sockaddr *)&their_addr), ipstr, sizeof(ipstr));
-        printf("Got a connection from %s [%d]\n", ipstr, new_fd);
+        printf("[%d] Got a connection from %s\n", new_fd, ipstr);
 
         if(!fork()) // if this is the child process
         {
             close(sockfd); // child doesn't need the listener
-            setsid();
+            //setsid();
             handle_client(new_fd);
             close(new_fd);
             _exit(0);
