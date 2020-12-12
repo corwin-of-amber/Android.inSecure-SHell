@@ -41,10 +41,11 @@ void readline(int sockfd, char *buf)
     buf[pos] = '\0';
 }
 
+int sigint_flag = 0;
+
 void sigint_handler(int signum)
 {
-   printf("\n\nCaught signal: %d\n\n", signum);
-   exit(signum);
+   sigint_flag = 1;
 }
 
 void print_addrinfo(struct addrinfo *input)
@@ -181,8 +182,15 @@ int main(int argc, char **argv)
     {
         readfds = master;
 
+        if (sigint_flag) {
+            buf[0] = 3;
+            if (send(sockfd, buf, 1, 0) == 1)
+                sigint_flag = 0;
+        }
+
         if(select(sockfd + 1, &readfds, NULL, NULL, NULL) == -1)
         {
+            if (errno == EAGAIN || errno == EINTR) continue;
             perror("select");
             return 7;
         }
