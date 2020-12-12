@@ -3,6 +3,7 @@
  */
 
 #include <unistd.h>
+#include <stdlib.h>
 #include <sys/socket.h>
 #include <string.h>
 #include <strings.h>
@@ -11,8 +12,9 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 
-#define BUFFERSIZE 64 * 1024
+#include "config.h"
 
 struct LineBuffered {
     char read_buf[BUFFERSIZE];
@@ -26,7 +28,9 @@ int handle_control_command(int sockfd, struct LineBuffered *incoming);
 int handle_get(int sockfd, const char *pathname);
 int handle_get_dir(int sockfd, const char *pathname);
 int handle_get_file(int sockfd, const char *pathname);
-int handle_put(int sockfd, const char *pathname, struct LineBuffered *incoming);
+int handle_put(int sockfd, const char *pathname,
+               struct LineBuffered *incoming);
+int handle_exec(int sockfd, const char *command);
 
 
 void handle_control(int sockfd, char *buf, int buf_sz)
@@ -73,7 +77,7 @@ void handle_control(int sockfd, char *buf, int buf_sz)
 int handle_control_command(int sockfd, struct LineBuffered *incoming)
 {
     incoming->line_buf[incoming->line_pos] = '\0';
-    printf("line: [%s]\n", incoming->line_buf);
+    printf("[%d] line: [%s]\n", sockfd, incoming->line_buf);
 
     const char *cmd = incoming->line_buf;
     int rc = -1;
@@ -82,6 +86,8 @@ int handle_control_command(int sockfd, struct LineBuffered *incoming)
         rc = handle_get(sockfd, incoming->line_buf + 4);
     else if (strncasecmp(cmd, "PUT ", 4) == 0)
         rc = handle_put(sockfd, incoming->line_buf + 4, incoming);
+    else if (strncasecmp(cmd, "EXEC ", 5) == 0)
+        rc = handle_exec(sockfd, incoming->line_buf + 5);
 
     if (rc < 0)
         send(sockfd, "<error>\n", 8, 0);
@@ -177,4 +183,45 @@ int handle_put(int sockfd, const char *pathname,
 
     close(outfd);
     return rc;
+}
+
+int handle_exec(int sockfd, const char *command)
+{
+    int pipefd[2];
+
+    if (pipe(pipefd) < 0) { perror("pipe"); return -1; }
+
+    int pid = fork(), rc = 0;
+
+
+    if (pid == 0) { /* child */
+        dup2(pipefd[1], 1); close(sockfd); close(pipefd[0]);
+        execl(SHELL, SHELL_NAME, "-c", command, NULL);
+        /* error in exec */
+        perror("execl"); close(1); exit(1);
+    }
+    else close(pipefd[1]);
+    
+    while (1) {
+        char buf[BUFFERSIZE];
+        int sz = read(pipefd[0], buf, sizeof(buf));
+
+        if (sz < 0) { perror("read"); rc = -1; break; }
+        else if (sz == 0) break;
+
+        int wz = send(sockfd, buf, sz, 0);
+        if (wz < 0) { perror("send"); rc = -1; break; }
+        else if (wz < sz)  /* should block */
+        { /* ?? */ fprintf(stderr, "warning: short send\n"); }
+    }
+    
+    close(pipefd[0]);
+
+    if (waitpid(pid, &rc, 0) < 0) { /** @todo prev rc is lost */
+        perror("waitpid"); return -1;
+    }
+
+    printf("[%d] exit (%x)\n", sockfd, rc);
+
+    return rc ? -1 : 0;
 }

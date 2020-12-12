@@ -8,6 +8,7 @@
 
 int send_get(int sockfd, const char *pathname);
 int send_put(int sockfd, const char *pathname);
+int send_exec(int sockfd, const char *command);
 
 int send_command(int sockfd, const char *cmd, const char *arg)
 {
@@ -19,6 +20,10 @@ int send_command(int sockfd, const char *cmd, const char *arg)
         rc = send_get(sockfd, arg);
     else if (strcasecmp(cmd, "PUT") == 0)
         rc = send_put(sockfd, arg);
+    else if (strcasecmp(cmd, "EXEC") == 0)
+        rc = send_exec(sockfd, arg);
+    else
+        fprintf(stderr, "unknown command: '%s'\n", cmd);
 
     close(sockfd);
     return rc;
@@ -79,5 +84,31 @@ int send_put(int sockfd, const char *pathname)
     }
     
     return rc;
+}
+
+int send_exec(int sockfd, const char *command)
+{
+    /** @oops this is basically send_get */
+    int rc = 0;
+
+    send(sockfd, "EXEC ", 5, 0);
+    send(sockfd, command, strlen(command), 0);
+    send(sockfd, "\n", 1, 0);
+    shutdown(sockfd, SHUT_WR);
+
+    while (1) {
+        char buf[BUFFERSIZE];
+        int sz = recv(sockfd, buf, sizeof(buf), 0);
+
+        if (sz < 0) { perror("recv"); rc = -1; break; }
+        else if (sz == 0) break;
+
+        int wz = write(1, buf, sz);
+        if (wz < 0) { perror("write stdout"); rc = -1; break; }
+        else if (wz < sz) 
+        { /* ?? */ fprintf(stderr, "warning: short write\n"); }
+    }
+
+    return rc;    
 }
 

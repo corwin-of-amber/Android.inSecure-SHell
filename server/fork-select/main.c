@@ -22,14 +22,9 @@
 #include <termios.h>
 #include <unistd.h>
 
+#include "config.h"
 #include "control.h"
 
-#ifdef __ANDROID_API__
-#define SHELL "/system/xbin/bash"
-#else
-#define SHELL "/bin/bash"
-#endif
-#define SHELL_NAME "bash"
 
 #if defined(__ANDROID_API__) && __ANDROID_API__ < 21
 /* polyfilled in infra/glibc/forkpty.c */
@@ -37,10 +32,6 @@ pid_t forkpty(int *amaster, char *name, const struct termios *termp,
               const struct winsize *winp);
 #endif
 
-#define PORT   "2220"
-#define SECRET "<plain-sight>"
-#define CTRLTOK "<control>"
-#define BUFFERSIZE 64 * 1024
 
 void sigchld_handler(int s)
 {
@@ -78,7 +69,7 @@ void handle_client(int sockfd)
     if (strcmp(shared_key, SECRET) != 0)
     {
         if (strcmp(shared_key, CTRLTOK) == 0) {
-            printf("[%d] Switching to control protocol", sockfd);
+            printf("[%d] Switching to control protocol\n", sockfd);
             handle_control(sockfd, eol + 1, 
                     shared_key + nbytes - eol - 1);
         }
